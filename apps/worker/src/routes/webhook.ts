@@ -467,8 +467,19 @@ async function handleEvent(
       event.source.type === 'user' ? event.source.userId : undefined;
     if (!userId) return;
 
-    const friend = await getFriendByLineUserId(db, userId);
-    if (!friend) return;
+    let friend = await getFriendByLineUserId(db, userId);
+    if (!friend) {
+      friend = await upsertFriend(db, {
+        lineUserId: userId,
+        displayName: null,
+        pictureUrl: null,
+        statusMessage: null,
+      });
+      if (lineAccountId) {
+        await db.prepare('UPDATE friends SET line_account_id = ?, updated_at = ? WHERE id = ?')
+          .bind(lineAccountId, jstNow(), friend.id).run();
+      }
+    }
 
     const incomingText = textMessage.text;
     const now = jstNow();

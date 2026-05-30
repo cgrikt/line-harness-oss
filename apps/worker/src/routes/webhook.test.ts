@@ -40,6 +40,12 @@ vi.mock('../services/step-delivery.js', () => ({
   expandVariables: vi.fn(),
 }));
 
+import {
+  getFriendByLineUserId,
+  getLineAccounts,
+  jstNow,
+  upsertFriend,
+} from '@line-crm/db';
 import { verifySignature } from '@line-crm/line-sdk';
 import { webhook } from './webhook.js';
 
@@ -64,6 +70,39 @@ const baseExecutionCtx = {
 beforeEach(() => {
   vi.clearAllMocks();
 });
+
+function createRecordingDb() {
+  const inserts: Array<{ sql: string; binds: unknown[] }> = [];
+  return {
+    inserts,
+    db: {
+      prepare(sql: string) {
+        return {
+          bind(...binds: unknown[]) {
+            return {
+              async run() {
+                inserts.push({ sql, binds });
+                return { success: true };
+              },
+              async all<T>() {
+                return { results: [] as T[] };
+              },
+              async first<T>() {
+                return null as T | null;
+              },
+            };
+          },
+          async all<T>() {
+            return { results: [] as T[] };
+          },
+          async first<T>() {
+            return null as T | null;
+          },
+        };
+      },
+    } as unknown as D1Database,
+  };
+}
 
 describe('POST /webhook — DoS defenses (#104)', () => {
   test('rejects with 413 when Content-Length declares an oversized body', async () => {
@@ -154,5 +193,72 @@ describe('POST /webhook — DoS defenses (#104)', () => {
     expect(res.status).toBe(200);
     // Fast-rejected before any crypto / DB work.
     expect(verifySignature).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST /webhook — unknown friend recovery', () => {
+  test('auto-creates a friend and logs text when a registered LINE user record is missing', async () => {
+    vi.mocked(verifySignature).mockResolvedValue(true);
+    vi.mocked(getLineAccounts).mockResolvedValue([]);
+    vi.mocked(getFriendByLineUserId).mockResolvedValue(null);
+    vi.mocked(upsertFriend).mockResolvedValue({
+      id: 'friend-autocreated',
+      line_user_id: 'Uunknown',
+      display_name: null,
+      picture_url: null,
+      status_message: null,
+      is_following: 1,
+      line_account_id: null,
+    } as never);
+    vi.mocked(jstNow).mockReturnValue('2026-05-30T19:45:00.000+09:00');
+
+    const app = setupApp();
+    const recording = createRecordingDb();
+    const executionCtx = {
+      ...baseExecutionCtx,
+      waitUntil: vi.fn(),
+    } as unknown as ExecutionContext;
+    const validShapedSignature = 'A'.repeat(43) + '=';
+
+    const res = await app.request(
+      '/webhook',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Line-Signature': validShapedSignature,
+        },
+        body: JSON.stringify({
+          events: [
+            {
+              type: 'message',
+              replyToken: 'reply-token',
+              source: { type: 'user', userId: 'Uunknown' },
+              message: { id: 'message-id', type: 'text', text: '既存友だちからの初回メッセージ' },
+              timestamp: 1760000000000,
+            },
+          ],
+        }),
+      },
+      { ...baseEnv, DB: recording.db },
+      executionCtx,
+    );
+
+    expect(res.status).toBe(200);
+    const waitUntilPromise = vi.mocked(executionCtx.waitUntil).mock.calls[0]?.[0] as Promise<unknown> | undefined;
+    await waitUntilPromise;
+
+    expect(upsertFriend).toHaveBeenCalledWith(recording.db, expect.objectContaining({
+      lineUserId: 'Uunknown',
+      displayName: null,
+      pictureUrl: null,
+      statusMessage: null,
+    }));
+    expect(recording.inserts).toEqual([
+      expect.objectContaining({
+        sql: expect.stringContaining('INSERT INTO messages_log'),
+        binds: expect.arrayContaining(['friend-autocreated', '既存友だちからの初回メッセージ']),
+      }),
+    ]);
   });
 });
