@@ -7,12 +7,6 @@ const LOCATION_GUIDANCE = [
     address: '栄4-3-15 丸美観光ビル 4F',
     mapUrl: 'https://www.google.com/maps/search/?api=1&query=%E6%A0%844-3-15%20%E4%B8%B8%E7%BE%8E%E8%A6%B3%E5%85%89%E3%83%93%E3%83%AB4F',
   },
-  {
-    label: '新宿',
-    area: '新宿・歌舞伎町',
-    address: '歌舞伎町2-14-8 メトロプラザ2ビル 8F',
-    mapUrl: 'https://www.google.com/maps/search/?api=1&query=%E6%AD%8C%E8%88%9E%E4%BC%8E%E7%94%BA2-14-8%20%E3%83%A1%E3%83%88%E3%83%AD%E3%83%97%E3%83%A9%E3%82%B62%E3%83%93%E3%83%AB8F',
-  },
 ];
 
 export default function Done() {
@@ -29,7 +23,7 @@ export default function Done() {
       <section className="rounded-2xl border bg-white p-4 text-left shadow-sm" aria-label="出勤場所の住所とマップ">
         <div className="text-center">
           <h2 className="text-base font-bold">出勤場所</h2>
-          <p className="mt-1 text-xs text-gray-500">スクショしやすいように、住所とマップをまとめています。</p>
+          <p className="mt-1 text-xs text-gray-500">スクショしやすいように、名古屋の住所とマップをまとめています。新宿でのご相談は火曜のみ個別に調整します。</p>
         </div>
         <div className="mt-3 space-y-3">
           {LOCATION_GUIDANCE.map((location) => (
