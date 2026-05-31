@@ -50,14 +50,15 @@ export async function summarizeOfficialLineAnalytics(
   db: D1Database,
   input: OfficialLineAnalyticsInput,
 ): Promise<OfficialLineAnalyticsSummary> {
-  const friendBinds: unknown[] = [input.accountId];
+  const accountFilter = `(f.line_account_id = ? OR f.line_account_id IN (SELECT id FROM line_accounts WHERE channel_id = ?))`;
+  const friendBinds: unknown[] = [input.accountId, input.accountId];
   const friendDateClause = dateClause('f', input, friendBinds);
   const friendRow = await db
-    .prepare(`SELECT COUNT(*) AS friendAddCount FROM friends f WHERE f.line_account_id = ?${friendDateClause}`)
+    .prepare(`SELECT COUNT(*) AS friendAddCount FROM friends f WHERE ${accountFilter}${friendDateClause}`)
     .bind(...friendBinds)
     .first<CountRow>();
 
-  const conversionBinds: unknown[] = [input.accountId];
+  const conversionBinds: unknown[] = [input.accountId, input.accountId];
   const conversionDateClause = dateClause('ce', input, conversionBinds);
   const conversionRows = await db
     .prepare(
@@ -65,20 +66,20 @@ export async function summarizeOfficialLineAnalytics(
          FROM conversion_events ce
          INNER JOIN conversion_points cp ON cp.id = ce.conversion_point_id
          INNER JOIN friends f ON f.id = ce.friend_id
-        WHERE f.line_account_id = ?${conversionDateClause}
+        WHERE ${accountFilter}${conversionDateClause}
         GROUP BY cp.event_type`,
     )
     .bind(...conversionBinds)
     .all<CountRow>();
 
-  const xBinds: unknown[] = [input.accountId];
+  const xBinds: unknown[] = [input.accountId, input.accountId];
   const xDateClause = dateClause('rt', input, xBinds);
   const xRow = await db
     .prepare(
       `SELECT COUNT(*) AS xReferralCount
          FROM ref_tracking rt
          INNER JOIN friends f ON f.id = rt.friend_id
-        WHERE f.line_account_id = ?${xDateClause}
+        WHERE ${accountFilter}${xDateClause}
           AND (
             lower(rt.ref_code) LIKE '%x%'
             OR lower(coalesce(rt.source_url, '')) LIKE '%x.com%'

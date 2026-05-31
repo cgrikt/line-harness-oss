@@ -48,5 +48,6 @@ describe('official LINE analytics summary', () => {
       xReferralCount: 17,
     });
     expect(prepared.join('\n')).toContain('line_account_id = ?');
+    expect(prepared.join('\n')).toContain('SELECT id FROM line_accounts WHERE channel_id = ?');
   });
 });
