@@ -19,6 +19,7 @@ import { processDueReminders } from './services/booking-reminders.js';
 import { runExpirer } from './services/booking-expirer.js';
 import { processDueEventReminders } from './services/event-booking-reminders.js';
 import { runEventBookingExpirer } from './services/event-booking-expirer.js';
+import { processAbandonedBookingStarts } from './services/booking-abandonment.js';
 import { sendEventBookingNotification } from './services/event-booking-notifier.js';
 import { sendBookingNotification } from './services/booking-notifier.js';
 import { DEFAULT_ACCOUNT_SETTINGS } from './services/booking-types.js';
@@ -610,6 +611,27 @@ async function scheduled(
     }
   } catch (e) {
     console.error('booking-reminders error:', e);
+  }
+
+  // Booking abandonment reminders — booking page opened but request not completed.
+  try {
+    const bookingBaseUrl = env.LIFF_PUBLIC_URL ?? env.LIFF_URL;
+    const result = await processAbandonedBookingStarts(env.DB, {
+      now: new Date(),
+      thresholdMinutes: 60,
+      bookingUrl: `${bookingBaseUrl.replace(/\/$/, '')}/booking`,
+      sender: async (message) => {
+        const client = new LineClient(message.channelAccessToken);
+        await client.pushMessage(message.toLineUserId, [
+          { type: 'text', text: `${message.text}\n\n${message.bookingUrl}` },
+        ]);
+      },
+    });
+    if (result.sent + result.failed > 0) {
+      console.log(`[booking-abandonment] sent=${result.sent} failed=${result.failed}`);
+    }
+  } catch (e) {
+    console.error('booking-abandonment error:', e);
   }
 
   // Booking expirer — runs only on the 6h cron tick.

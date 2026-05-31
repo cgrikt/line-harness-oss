@@ -19,6 +19,7 @@ export default function Booking() {
   const [menu, setMenu] = useState<MenuItem | null>(null);
   const [staff, setStaff] = useState<StaffItem | null>(null);
   const [slot, setSlot] = useState<{ date: string; start: string } | null>(null);
+  const [startEventId, setStartEventId] = useState<string | null>(null);
   const [loadingStaff, setLoadingStaff] = useState(false);
   const [staffError, setStaffError] = useState<string | null>(null);
 
@@ -48,6 +49,9 @@ export default function Booking() {
         return;
       }
       setStaff(first);
+      api.startBooking({ menu_id: m.id, staff_id: first.id, source: 'liff_booking' })
+        .then((res) => setStartEventId(res.start_event_id))
+        .catch((err) => console.warn('[booking] start event failed:', err));
       setStep('datetime');
     } catch (e) {
       setStaffError(e instanceof Error ? e.message : String(e));
@@ -98,6 +102,7 @@ export default function Booking() {
           menu={menu}
           staff={staff}
           slot={slot}
+          startEventId={startEventId}
           onSubmitted={() => setStep('done')}
           onBack={() => setStep('datetime')}
         />

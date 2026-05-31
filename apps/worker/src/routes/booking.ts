@@ -26,6 +26,7 @@ import {
   IDEMPOTENCY_TTL_MINUTES,
   type BookingStatus,
 } from '../services/booking-types.js';
+import { recordBookingFunnelEvent } from '../services/booking-abandonment.js';
 
 const booking = new Hono<Env>();
 
@@ -325,6 +326,31 @@ booking.get('/api/liff/booking/availability', async (c) => {
   return c.json(result);
 });
 
+booking.post('/api/liff/booking/start', async (c) => {
+  const accountId = await resolveAccountIdFromLiff(c);
+  if (!accountId) return c.json({ error: 'unknown_liff' }, 404);
+  const callerLineUserId = await verifyCallerLineUserId(c);
+  if (!callerLineUserId) return c.json({ error: 'unauthorized' }, 401);
+  const friendId = await resolveFriendId(c, callerLineUserId, accountId);
+  if (!friendId) return c.json({ error: 'friend_not_found' }, 404);
+  const body = await c.req.json<{
+    menu_id?: string;
+    staff_id?: string;
+    source?: string;
+  }>().catch(() => ({}));
+  const startEventId = await recordBookingFunnelEvent(c.env.DB, {
+    friendId,
+    eventType: 'booking_started',
+    metadata: {
+      menu_id: body.menu_id ?? null,
+      staff_id: body.staff_id ?? null,
+      source: body.source ?? 'liff_booking',
+    },
+    now: new Date(),
+  });
+  return c.json({ start_event_id: startEventId });
+});
+
 booking.post('/api/liff/booking/requests', async (c) => {
   const accountId = await resolveAccountIdFromLiff(c);
   if (!accountId) return c.json({ error: 'unknown_liff' }, 404);
@@ -340,6 +366,7 @@ booking.post('/api/liff/booking/requests', async (c) => {
     staff_id: string;
     starts_at: string; // UTC ISO8601
     customer_note?: string;
+    start_event_id?: string;
   }>();
   if (!body.menu_id || !body.staff_id || !body.starts_at) {
     return c.json({ error: 'missing_params' }, 400);
@@ -506,6 +533,18 @@ booking.post('/api/liff/booking/requests', async (c) => {
       applyBookingIntentTag(c.env.DB, friendId, menuRow.name, accountId).catch((err) =>
         console.error('booking intent tag failed:', err),
       ),
+      recordBookingFunnelEvent(c.env.DB, {
+        friendId,
+        eventType: 'booking_completed',
+        metadata: {
+          booking_id: bookingId,
+          start_event_id: body.start_event_id ?? null,
+          menu_id: body.menu_id,
+          staff_id: body.staff_id,
+          source: 'liff_booking',
+        },
+        now: new Date(),
+      }).catch((err) => console.error('booking funnel completion failed:', err)),
     ]),
   );
 

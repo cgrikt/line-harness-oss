@@ -125,9 +125,11 @@ export const api = {
     if (staffId) qs.set('staff_id', staffId);
     return get<AvailabilityResponse>(`/api/liff/booking/availability?${qs}`);
   },
+  startBooking: (body: { menu_id?: string; staff_id?: string; source?: string }) =>
+    post<{ start_event_id: string }>('/api/liff/booking/start', body),
   // Worker 側で id_token を verify するので lineUserId は body に入れない。
   createRequest: (
-    body: { menu_id: string; staff_id: string; starts_at: string; customer_note?: string },
+    body: { menu_id: string; staff_id: string; starts_at: string; customer_note?: string; start_event_id?: string },
     idempotencyKey: string,
   ) =>
     post<{ booking_id: string; status: string }>(

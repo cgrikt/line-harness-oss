@@ -7,12 +7,14 @@ export default function Confirm({
   menu,
   staff,
   slot,
+  startEventId,
   onSubmitted,
   onBack,
 }: {
   menu: MenuItem;
   staff: StaffItem;
   slot: { date: string; start: string };
+  startEventId?: string | null;
   onSubmitted: () => void;
   onBack: () => void;
 }) {
@@ -29,6 +31,7 @@ export default function Confirm({
           menu_id: menu.id,
           staff_id: staff.id,
           starts_at: jstStartsAtIso(slot.date, slot.start),
+          start_event_id: startEventId ?? undefined,
         },
         idemKey,
       );
