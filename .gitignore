@@ -10,6 +10,8 @@ dist/
 .mcp.json
 *.toml.bak
 .line-harness-setup.json
+apps/worker/wrangler.toml
+apps/worker/wrangler.local.toml
 tmp/
 .env.production
 .env.staging
