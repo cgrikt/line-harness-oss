@@ -25,6 +25,7 @@ describe('official LINE analytics summary', () => {
           { event_type: 'trial_consultation', count: 3 },
           { event_type: 'designation_booking', count: 2 },
         ]);
+        if (sql.includes('FROM conversion_events') && sql.includes('NOT EXISTS')) return stmt({ count: 12 });
         if (sql.includes('FROM ref_tracking') && sql.includes('xReferralCount')) return stmt({ xReferralCount: 17 });
         throw new Error(`unexpected SQL: ${sql}`);
       },

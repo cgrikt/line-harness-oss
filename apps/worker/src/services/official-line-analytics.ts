@@ -72,6 +72,31 @@ export async function summarizeOfficialLineAnalytics(
     .bind(...conversionBinds)
     .all<CountRow>();
 
+  const abandonedBinds: unknown[] = [input.accountId, input.accountId];
+  const abandonedDateClause = dateClause('ce', input, abandonedBinds);
+  const abandonedRow = await db
+    .prepare(
+      `SELECT COUNT(*) AS count
+         FROM conversion_events ce
+         INNER JOIN conversion_points cp ON cp.id = ce.conversion_point_id
+         INNER JOIN friends f ON f.id = ce.friend_id
+        WHERE ${accountFilter}${abandonedDateClause}
+          AND cp.event_type = 'booking_started'
+          AND NOT EXISTS (
+            SELECT 1
+              FROM conversion_events done
+              INNER JOIN conversion_points done_cp ON done_cp.id = done.conversion_point_id
+             WHERE done.friend_id = ce.friend_id
+               AND done_cp.event_type = 'booking_completed'
+               AND (
+                 json_extract(done.metadata, '$.start_event_id') = ce.id
+                 OR done.created_at >= ce.created_at
+               )
+          )`,
+    )
+    .bind(...abandonedBinds)
+    .first<CountRow>();
+
   const xBinds: unknown[] = [input.accountId, input.accountId];
   const xDateClause = dateClause('rt', input, xBinds);
   const xRow = await db
@@ -94,7 +119,7 @@ export async function summarizeOfficialLineAnalytics(
     giftSurveyResponseCount: 0,
     bookingStartCount: 0,
     bookingCompleteCount: 0,
-    bookingAbandonedCount: 0,
+    bookingAbandonedCount: asCount(abandonedRow?.count),
     bookingAbandonedReminderSentCount: 0,
     trialConsultationCount: 0,
     designationBookingCount: 0,
@@ -105,6 +130,5 @@ export async function summarizeOfficialLineAnalytics(
     const key = conversionMetricKey(String(row.event_type ?? ''));
     if (key) summary[key] += asCount(row.count);
   }
-  summary.bookingAbandonedCount = Math.max(0, summary.bookingStartCount - summary.bookingCompleteCount);
   return summary;
 }
