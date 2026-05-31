@@ -114,6 +114,23 @@ export async function summarizeOfficialLineAnalytics(
     .bind(...xBinds)
     .first<CountRow>();
 
+  const xClickBinds: unknown[] = [];
+  const xClickDateClause = dateClause('lc', input, xClickBinds);
+  const xClickRow = await db
+    .prepare(
+      `SELECT COUNT(*) AS xReferralCount
+         FROM link_clicks lc
+         INNER JOIN tracked_links tl ON tl.id = lc.tracked_link_id
+        WHERE (
+            tl.id = 'nekoya-sns-x'
+            OR lower(tl.name) LIKE '%猫屋%x%'
+            OR lower(tl.original_url) LIKE '%x.com%'
+            OR lower(tl.original_url) LIKE '%twitter.com%'
+          )${xClickDateClause}`,
+    )
+    .bind(...xClickBinds)
+    .first<CountRow>();
+
   const summary: OfficialLineAnalyticsSummary = {
     friendAddCount: asCount(friendRow?.friendAddCount),
     giftSurveyResponseCount: 0,
@@ -123,7 +140,7 @@ export async function summarizeOfficialLineAnalytics(
     bookingAbandonedReminderSentCount: 0,
     trialConsultationCount: 0,
     designationBookingCount: 0,
-    xReferralCount: asCount(xRow?.xReferralCount),
+    xReferralCount: asCount(xRow?.xReferralCount) + asCount(xClickRow?.xReferralCount),
   };
 
   for (const row of conversionRows.results ?? []) {

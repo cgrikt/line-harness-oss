@@ -27,6 +27,7 @@ describe('official LINE analytics summary', () => {
         ]);
         if (sql.includes('FROM conversion_events') && sql.includes('NOT EXISTS')) return stmt({ count: 12 });
         if (sql.includes('FROM ref_tracking') && sql.includes('xReferralCount')) return stmt({ xReferralCount: 17 });
+        if (sql.includes('FROM link_clicks') && sql.includes('xReferralCount')) return stmt({ xReferralCount: 4 });
         throw new Error(`unexpected SQL: ${sql}`);
       },
     } as unknown as D1Database;
@@ -46,7 +47,7 @@ describe('official LINE analytics summary', () => {
       bookingAbandonedReminderSentCount: 5,
       trialConsultationCount: 3,
       designationBookingCount: 2,
-      xReferralCount: 17,
+      xReferralCount: 21,
     });
     expect(prepared.join('\n')).toContain('line_account_id = ?');
     expect(prepared.join('\n')).toContain('SELECT id FROM line_accounts WHERE channel_id = ?');

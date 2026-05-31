@@ -421,6 +421,36 @@ forms.post('/api/forms/:id/submit', async (c) => {
 
       const sideEffects: Promise<unknown>[] = [];
 
+      if (isNekoyaSurveyAnswers(submissionData)) {
+        sideEffects.push(
+          (async () => {
+            const friend = await getFriendById(db, friendId!);
+            const conversionPointId = 'nekoya-gift-survey-response';
+            await db
+              .prepare(
+                `INSERT OR IGNORE INTO conversion_points (id, name, event_type, value, created_at)
+                 VALUES (?, ?, ?, NULL, ?)`,
+              )
+              .bind(conversionPointId, '猫屋シキ 特典アンケート回答', 'gift_survey_response', now)
+              .run();
+            await db
+              .prepare(
+                `INSERT INTO conversion_events (id, conversion_point_id, friend_id, user_id, affiliate_code, metadata, created_at)
+                 VALUES (?, ?, ?, ?, NULL, ?, ?)`,
+              )
+              .bind(
+                crypto.randomUUID(),
+                conversionPointId,
+                friendId,
+                (friend as unknown as Record<string, string | null> | null)?.user_id ?? null,
+                JSON.stringify({ form_id: formId, submission_id: submission.id }),
+                now,
+              )
+              .run();
+          })(),
+        );
+      }
+
       // Save response data to friend's metadata
       if (form.save_to_metadata) {
         sideEffects.push(
