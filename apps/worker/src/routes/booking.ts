@@ -337,7 +337,7 @@ booking.post('/api/liff/booking/start', async (c) => {
     menu_id?: string;
     staff_id?: string;
     source?: string;
-  }>().catch(() => ({}));
+  }>().catch((): { menu_id?: string; staff_id?: string; source?: string } => ({}));
   const startEventId = await recordBookingFunnelEvent(c.env.DB, {
     friendId,
     eventType: 'booking_started',
