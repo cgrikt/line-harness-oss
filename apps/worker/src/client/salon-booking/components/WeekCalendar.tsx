@@ -25,6 +25,16 @@ function fromMin(min: number): string {
 }
 
 const SLOT_MIN = 30;
+const DEFAULT_ROWS = ['21:00', '21:30', '22:00', '22:30', '23:00'];
+
+function isRegularClosedDay(date: string): boolean {
+  const d = new Date(`${date}T00:00:00Z`);
+  const dayOfWeek = d.getUTCDay();
+  if (dayOfWeek === 2) return true;
+  const next = new Date(d);
+  next.setUTCDate(d.getUTCDate() + 1);
+  return next.getUTCDate() === 1;
+}
 
 export default function WeekCalendar({
   byDate,
@@ -38,24 +48,16 @@ export default function WeekCalendar({
     [weekStart],
   );
 
-  const { rows, hasAny } = useMemo(() => {
+  const { rows } = useMemo(() => {
     const set = new Set<number>();
     for (const d of dates) for (const t of byDate[d] ?? []) set.add(toMin(t));
-    if (set.size === 0) return { rows: [] as string[], hasAny: false };
+    if (set.size === 0) return { rows: DEFAULT_ROWS, hasAny: false };
     const min = Math.min(...set);
     const max = Math.max(...set);
     const arr: string[] = [];
     for (let m = min; m <= max; m += SLOT_MIN) arr.push(fromMin(m));
     return { rows: arr, hasAny: true };
   }, [byDate, dates]);
-
-  if (!hasAny) {
-    return (
-      <div className="sb-card text-center text-sm text-gray-500 py-8">
-        この週に空きはありません
-      </div>
-    );
-  }
 
   const todayJst = new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 10);
 
@@ -76,6 +78,7 @@ export default function WeekCalendar({
         {dates.map((d) => {
           const dow = new Date(`${d}T00:00:00Z`).getUTCDay();
           const isToday = d === todayJst;
+          const isClosed = isRegularClosedDay(d);
           const tone = dow === 0 ? '#ef4444' : dow === 6 ? '#3b82f6' : '#374151';
           return (
             <div
@@ -105,6 +108,7 @@ export default function WeekCalendar({
               >
                 {Number(d.slice(8))}
               </div>
+              {isClosed ? <div className="text-[9px] text-gray-400 mt-1">定休日</div> : null}
             </div>
           );
         })}
@@ -126,6 +130,7 @@ export default function WeekCalendar({
               </div>
               {dates.map((d) => {
                 const slots = byDate[d] ?? [];
+                const closed = isRegularClosedDay(d);
                 const available = slots.includes(t);
                 const isSelected =
                   available && selectedDate === d && selectedStart === t;
@@ -139,7 +144,11 @@ export default function WeekCalendar({
                       padding: 1,
                     }}
                   >
-                    {available ? (
+                    {closed ? (
+                      <div className="h-full rounded-md flex items-center justify-center text-[10px] text-gray-300 bg-gray-50">
+                        休
+                      </div>
+                    ) : available ? (
                       <button
                         onClick={() => onPick({ date: d, start: t })}
                         className="rounded-md transition-transform active:scale-90 tabular-nums"

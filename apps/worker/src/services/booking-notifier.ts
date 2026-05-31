@@ -19,20 +19,20 @@ export function renderNotificationText(
   kind: NotificationKind,
   ctx: NotificationContext,
 ): string {
-  const detail = `\nメニュー: ${ctx.menuName}\n担当: ${ctx.staffName}\n日時: ${ctx.startsAtJst}`;
+  const detail = `\nプラン: ${ctx.menuName.replace(/^プラン:\s*/, '')}\n日時: ${ctx.startsAtJst}`;
   switch (kind) {
     case 'requested':
-      return `予約リクエストを受け付けました。${detail}\n\nお店からの返信をお待ちください。`;
+      return `予約リクエストを受け付けました。${detail}\n\n前日の同じ時間帯にもLINEでお知らせします。`;
     case 'approved':
-      return `予約が確定しました。${detail}\n\n変更・キャンセルはお店に直接ご連絡ください。`;
+      return `予約が入りました。${detail}\n\n変更・キャンセルは予約履歴からできます。`;
     case 'rejected':
       return `申し訳ありません、ご希望の枠でお取りできませんでした。\n別の日時で再度お試しください。`;
     case 'expired':
       return `予約リクエストが 24 時間返信が無かったため、期限切れになりました。${detail}`;
     case 'day_before':
-      return `明日のご予約のお知らせです。${detail}`;
+      return `明日の同じ時間帯になりました。ご予定の確認です。${detail}`;
     case 'hours_before':
-      return `本日のご予約まであと ${ctx.hoursBefore} 時間です。${detail}`;
+      return `ご予約まであと ${ctx.hoursBefore} 時間です。${detail}`;
   }
 }
 

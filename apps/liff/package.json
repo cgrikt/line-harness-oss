@@ -6,8 +6,9 @@
   "scripts": {
     "dev": "vite --port 3002",
     "build": "tsc -b && vite build",
+    "build:nekoya": "VITE_API_BASE=https://line-harness.nekoya.workers.dev VITE_DEFAULT_LIFF_ID=2010232797-yJ0Qbyzg pnpm build",
     "preview": "vite preview --port 3002",
-    "deploy": "pnpm build && wrangler pages deploy dist"
+    "deploy": "pnpm build:nekoya && wrangler pages deploy dist --project-name line-harness-liff"
   },
   "dependencies": {
     "@line/liff": "^2.24.0",

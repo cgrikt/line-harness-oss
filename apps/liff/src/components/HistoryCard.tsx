@@ -1,9 +1,10 @@
 import type { BookingHistoryItem } from '../lib/api.js';
 import { utcToJstDisplay } from '../lib/datetime.js';
+import { nekoyaLocationLabel } from '../lib/nekoya-location.js';
 
 const STATUS_LABEL: Record<string, { label: string; color: string }> = {
   requested: { label: 'リクエスト中', color: 'bg-yellow-100 text-yellow-800' },
-  confirmed: { label: '確定', color: 'bg-green-100 text-green-800' },
+  confirmed: { label: '予約済み', color: 'bg-green-100 text-green-800' },
   rejected: { label: '不可', color: 'bg-gray-100 text-gray-600' },
   expired: { label: '期限切れ', color: 'bg-gray-100 text-gray-600' },
   cancelled: { label: 'キャンセル', color: 'bg-gray-100 text-gray-600' },
@@ -11,25 +12,46 @@ const STATUS_LABEL: Record<string, { label: string; color: string }> = {
   no_show: { label: '無断キャンセル', color: 'bg-red-100 text-red-800' },
 };
 
-export default function HistoryCard({ booking }: { booking: BookingHistoryItem }) {
+function planLabel(name: string) {
+  if (name.includes('指名')) return '指名';
+  if (name.includes('初回')) return '初回';
+  if (name.includes('体入') || name.includes('体験')) return '体入';
+  return name.replace(/^プラン:\s*/, '');
+}
+
+export default function HistoryCard({
+  booking,
+  onCancel,
+  cancelling,
+}: {
+  booking: BookingHistoryItem;
+  onCancel?: (booking: BookingHistoryItem) => void;
+  cancelling?: boolean;
+}) {
   const meta = STATUS_LABEL[booking.status] ?? { label: booking.status, color: 'bg-gray-100' };
+  const cancellable = onCancel && ['requested', 'confirmed'].includes(booking.status);
   return (
-    <li className="border rounded p-3 flex gap-3 items-start">
-      {booking.profile_image_url ? (
-        <img
-          src={booking.profile_image_url}
-          alt={booking.staff_name}
-          className="w-12 h-12 rounded-full object-cover"
-        />
-      ) : (
-        <div className="w-12 h-12 rounded-full bg-gray-200" />
-      )}
+    <li className="flex items-start gap-3 rounded border p-3">
+      <img
+        src={booking.profile_image_url || '/shiki-avatar.png'}
+        alt="猫屋シキ"
+        className="h-12 w-12 rounded-full object-cover"
+      />
       <div className="flex-1">
-        <div className="font-medium">{booking.menu_name}</div>
-        <div className="text-sm text-gray-600">{booking.staff_name}</div>
+        <div className="font-medium">プラン: {planLabel(booking.menu_name)}</div>
+        <div className="text-sm text-gray-600">{nekoyaLocationLabel()}</div>
         <div className="text-sm text-gray-600">{utcToJstDisplay(booking.starts_at)}</div>
+        {cancellable && (
+          <button
+            onClick={() => onCancel?.(booking)}
+            disabled={cancelling}
+            className="mt-2 rounded border px-3 py-1 text-xs text-gray-600 disabled:opacity-50"
+          >
+            {cancelling ? '取消中...' : 'キャンセルする'}
+          </button>
+        )}
       </div>
-      <span className={`text-xs px-2 py-1 rounded h-fit ${meta.color}`}>{meta.label}</span>
+      <span className={`h-fit rounded px-2 py-1 text-xs ${meta.color}`}>{meta.label}</span>
     </li>
   );
 }

@@ -18,6 +18,11 @@ import type {
   FormUsedByAccount,
 } from '@line-crm/db';
 import type { Env } from '../index.js';
+import {
+  buildNekoyaSurveyCtaMessage,
+  deriveNekoyaSurveyTagDefinitions,
+  isNekoyaSurveyAnswers,
+} from '../services/nekoya-crm.js';
 
 const forms = new Hono<Env>();
 
@@ -437,6 +442,19 @@ forms.post('/api/forms/:id/submit', async (c) => {
         sideEffects.push(addTagToFriend(db, friendId, form.on_submit_tag_id));
       }
 
+      const nekoyaSurveyTags = isNekoyaSurveyAnswers(submissionData)
+        ? deriveNekoyaSurveyTagDefinitions(submissionData)
+        : [];
+      for (const tag of nekoyaSurveyTags) {
+        sideEffects.push((async () => {
+          await db
+            .prepare(`INSERT OR IGNORE INTO tags (id, name, color, created_at) VALUES (?, ?, ?, ?)`) 
+            .bind(tag.id, tag.name, tag.color, now)
+            .run();
+          await addTagToFriend(db, friendId, tag.id);
+        })());
+      }
+
       // Enroll in scenario
       if (form.on_submit_scenario_id) {
         sideEffects.push(enrollFriendInScenario(db, friendId, form.on_submit_scenario_id));
@@ -574,6 +592,8 @@ forms.post('/api/forms/:id/submit', async (c) => {
             // Custom form message replaces default diagnostic result
             const expanded = expandVariables(form.on_submit_message_content, friendData, apiOrigin);
             messages.push(buildMessage(form.on_submit_message_type, expanded));
+          } else if (isNekoyaSurveyAnswers(submissionData)) {
+            messages.push(buildNekoyaSurveyCtaMessage(submissionData) as ReturnType<typeof buildMessage>);
           } else {
             // Default: send diagnostic result Flex
             messages.push(buildMessage('flex', JSON.stringify(resultFlex)));

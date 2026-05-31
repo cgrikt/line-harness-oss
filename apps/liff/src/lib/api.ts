@@ -136,6 +136,8 @@ export const api = {
       { 'Idempotency-Key': idempotencyKey },
     ),
   me: () => get<{ upcoming: BookingHistoryItem[]; past: BookingHistoryItem[] }>('/api/liff/booking/me'),
+  cancelMyBooking: (bookingId: string) =>
+    post<{ ok: true; status: string }>(`/api/liff/booking/me/${bookingId}/cancel`, {}),
 
   // ===== Event booking =====
   getEvent: (id: string) => get<EventDetail>(`/api/liff/events/${id}`),

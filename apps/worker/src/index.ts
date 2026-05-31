@@ -529,9 +529,24 @@ export const notFoundHandler = async (c: Parameters<typeof app.notFound>[0] exte
   if (path.startsWith('/api/') || path === '/webhook' || path === '/docs' || path === '/openapi.json') {
     return c.json({ success: false, error: 'Not found' }, 404);
   }
-  // Serve static assets (admin dashboard, LIFF pages)
+  // Serve static assets (admin dashboard, LIFF pages). Cloudflare's asset binding
+  // returns 404 for extensionless client-side routes such as /booking, so retry
+  // those routes against the SPA shell (/index.html). Without this, LIFF URLs
+  // opened as https://liff.line.me/<id>/booking can fail before liff.init().
   if (c.env.ASSETS && typeof c.env.ASSETS.fetch === 'function') {
-    return c.env.ASSETS.fetch(c.req.raw);
+    const assetRes = await c.env.ASSETS.fetch(c.req.raw);
+    const looksLikeSpaRoute = !path.split('/').pop()?.includes('.');
+    const redirectsSpaRouteToRoot =
+      (assetRes.status === 307 || assetRes.status === 308) &&
+      assetRes.headers.get('Location') === '/';
+    if ((assetRes.status !== 404 && !redirectsSpaRouteToRoot) || !looksLikeSpaRoute) {
+      return assetRes;
+    }
+
+    const indexUrl = new URL(c.req.url);
+    indexUrl.pathname = '/index.html';
+    indexUrl.search = '';
+    return c.env.ASSETS.fetch(new Request(indexUrl.toString(), c.req.raw));
   }
   return c.json({ success: false, error: 'Not found' }, 404);
 };

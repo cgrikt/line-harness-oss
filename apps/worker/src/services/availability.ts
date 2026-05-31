@@ -29,6 +29,13 @@ function fromMin(min: number): string {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
+function isMenuSlotAllowed(menuName: string, startHHMM: string): boolean {
+  const minutes = toMin(startHHMM);
+  if (minutes < 21 * 60 || minutes > 24 * 60) return false;
+  if (menuName.includes('初回') && minutes > 23 * 60) return false;
+  return true;
+}
+
 function subtract(working: Interval[], busy: Interval[]): { start: number; end: number }[] {
   let intervals = working.map((w) => ({ start: toMin(w.start), end: toMin(w.end) }));
   for (const b of busy) {
@@ -90,6 +97,16 @@ function eachDate(from: string, to: string): string[] {
   return out;
 }
 
+export function isRegularClosedDay(date: string): boolean {
+  const d = new Date(`${date}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return false;
+  const dayOfWeek = d.getUTCDay();
+  if (dayOfWeek === 2) return true; // Tuesday
+  const next = new Date(d);
+  next.setUTCDate(d.getUTCDate() + 1);
+  return next.getUTCDate() === 1; // Last day of month
+}
+
 export interface GetAvailabilityParams {
   lineAccountId: string;
   menuId: string;
@@ -106,7 +123,7 @@ export async function getAvailability(
 ): Promise<{ by_staff: AvailabilityByStaff[] }> {
   const menu = await db
     .prepare(
-      `SELECT m.duration_minutes, m.buffer_after_minutes,
+      `SELECT m.name, m.duration_minutes, m.buffer_after_minutes,
               sm.override_duration_minutes AS override_duration,
               sm.override_price AS override_price
          FROM menus m
@@ -116,6 +133,7 @@ export async function getAvailability(
     )
     .bind(params.menuId, params.staffId ?? '', params.lineAccountId)
     .first<{
+      name: string;
       duration_minutes: number;
       buffer_after_minutes: number;
       override_duration: number | null;
@@ -194,6 +212,7 @@ export async function getAvailability(
   for (const s of staffRows.results) {
     const slots: AvailabilityByStaff['slots'] = [];
     for (const date of dates) {
+      if (isRegularClosedDay(date)) continue;
       const shift = shifts.results.find((r) => r.staff_id === s.id && r.work_date === date);
       if (!shift) continue;
       const dayBookings = bookings.results
@@ -210,6 +229,7 @@ export async function getAvailability(
         granularityMinutes: SLOT_GRANULARITY_MINUTES,
       });
       for (const slot of daySlots) {
+        if (!isMenuSlotAllowed(menu.name, slot.start)) continue;
         const slotStartUtc = new Date(`${date}T${slot.start}:00+09:00`);
         if (slotStartUtc < minLeadAt) continue;
         slots.push({ date, start: slot.start, end: slot.end });

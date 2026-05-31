@@ -58,6 +58,46 @@ describe('notFoundHandler — root / request', () => {
     expect(assets.fetch).toHaveBeenCalledOnce();
   });
 
+  it('falls back to /index.html for LIFF SPA routes when the direct asset is missing', async () => {
+    const assets: Fetcher = {
+      fetch: vi.fn(async (input: RequestInfo | URL) => {
+        const url = new URL(input instanceof Request ? input.url : String(input));
+        if (url.pathname === '/index.html') {
+          return new Response('liff shell', { status: 200 });
+        }
+        return new Response('', { status: 404 });
+      }),
+    } as unknown as Fetcher;
+    const fetchApp = makeApp({ DB: {} as D1Database, ASSETS: assets });
+
+    const res = await fetchApp('/booking');
+
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe('liff shell');
+    expect(assets.fetch).toHaveBeenCalledTimes(2);
+    const secondCall = vi.mocked(assets.fetch).mock.calls[1]?.[0];
+    expect(new URL(secondCall instanceof Request ? secondCall.url : String(secondCall)).pathname).toBe('/index.html');
+  });
+
+  it('falls back to /index.html when the asset binding redirects an extensionless LIFF route to root', async () => {
+    const assets: Fetcher = {
+      fetch: vi.fn(async (input: RequestInfo | URL) => {
+        const url = new URL(input instanceof Request ? input.url : String(input));
+        if (url.pathname === '/index.html') {
+          return new Response('liff shell', { status: 200 });
+        }
+        return new Response('', { status: 307, headers: { Location: '/' } });
+      }),
+    } as unknown as Fetcher;
+    const fetchApp = makeApp({ DB: {} as D1Database, ASSETS: assets });
+
+    const res = await fetchApp('/booking');
+
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe('liff shell');
+    expect(assets.fetch).toHaveBeenCalledTimes(2);
+  });
+
   it('returns JSON 404 (not ASSETS lookup) for /api/* unknown paths', async () => {
     const assets: Fetcher = {
       fetch: vi.fn().mockResolvedValue(new Response('should not be called', { status: 200 })),

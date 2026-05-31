@@ -17,6 +17,7 @@
 
 import { initBooking } from './booking.js';
 import { initForm } from './form.js';
+import { resolveDefaultLiffId, resolveLiffPage } from './page-routing.js';
 
 declare const liff: {
   init(config: { liffId: string }): Promise<void>;
@@ -30,11 +31,14 @@ declare const liff: {
   closeWindow(): void;
 };
 
-// Resolve LIFF ID: ?liffId= param (from endpoint URL) > env var (fallback to ①)
+// Nekoya Shiki production LIFF ID. LIFF ID is a public identifier, not a secret.
+// Keep it as a deployment fallback so direct /booking links from rich menus do
+// not break when the URL lacks an explicit ?liffId= parameter.
+const NEKOYA_DEFAULT_LIFF_ID = '2010232797-yJ0Qbyzg';
+
+// Resolve LIFF ID: ?liffId= param > build-time env var > Nekoya deployment fallback.
 function detectLiffId(): string {
-  const fromParam = new URLSearchParams(window.location.search).get('liffId');
-  if (fromParam) return fromParam;
-  return import.meta.env?.VITE_LIFF_ID || '';
+  return resolveDefaultLiffId(window.location.href, import.meta.env?.VITE_LIFF_ID || '', NEKOYA_DEFAULT_LIFF_ID);
 }
 const LIFF_ID = detectLiffId();
 if (!LIFF_ID) {
@@ -55,10 +59,7 @@ function apiCall(path: string, options?: RequestInit): Promise<Response> {
 }
 
 function getPage(): string | null {
-  const path = window.location.pathname.replace(/^\/+/, '');
-  if (path === 'book') return 'book';
-  const params = new URLSearchParams(window.location.search);
-  return params.get('page');
+  return resolveLiffPage(window.location.href);
 }
 
 function getRedirectUrl(): string | null {

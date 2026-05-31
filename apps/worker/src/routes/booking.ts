@@ -11,10 +11,11 @@
 // scheduled_at / decided_at / expires_at) are written from the Worker.
 
 import { Hono, type Context } from 'hono';
-import { getLineAccounts } from '@line-crm/db';
+import { addTagToFriend, enrollFriendInScenario, getLineAccounts } from '@line-crm/db';
 import type { Env } from '../index.js';
 import { canTransition, nextStatus, type BookingAction } from '../services/booking-state.js';
-import { computeSlots, getAvailability } from '../services/availability.js';
+import { computeSlots, getAvailability, isRegularClosedDay } from '../services/availability.js';
+import { validateNekoyaBookingRequest } from '../services/nekoya-crm.js';
 import {
   findIdempotencyResponse,
   saveIdempotencyResponse,
@@ -36,6 +37,64 @@ const JST_OFFSET_MS = 9 * 3600_000;
 function startsAtJst(utcIso: string): string {
   const jst = new Date(new Date(utcIso).getTime() + JST_OFFSET_MS).toISOString();
   return `${jst.slice(0, 10)} ${jst.slice(11, 16)}`;
+}
+
+function previousJstDate(date: string): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+function normalizeOverMidnightStart(rawDate: string, rawHHMM: string) {
+  if (rawHHMM === '00:00') {
+    return { date: previousJstDate(rawDate), hhmm: '24:00' };
+  }
+  return { date: rawDate, hhmm: rawHHMM };
+}
+
+function jstHHMMForOperationalDate(utcIso: string, operationalDate: string): string {
+  const jst = new Date(new Date(utcIso).getTime() + JST_OFFSET_MS).toISOString();
+  const date = jst.slice(0, 10);
+  const hhmm = jst.slice(11, 16);
+  if (date > operationalDate && hhmm.startsWith('00:')) return `24:${hhmm.slice(3)}`;
+  return hhmm;
+}
+
+function bookingIntentTagForMenuName(menuName: string): { id: string; name: string; color: string } | null {
+  if (menuName.includes('指名')) {
+    return { id: 'booking.intent.designation', name: '予約導線: 指名', color: '#7C3AED' };
+  }
+  if (menuName.includes('初回')) {
+    return { id: 'booking.intent.first', name: '予約導線: 初回', color: '#06C755' };
+  }
+  if (menuName.includes('体入') || menuName.includes('体験')) {
+    return { id: 'booking.intent.recruiting', name: '予約導線: 体入', color: '#F59E0B' };
+  }
+  return null;
+}
+
+async function applyBookingIntentTag(db: D1Database, friendId: string, menuName: string, lineAccountId: string) {
+  const tag = bookingIntentTagForMenuName(menuName);
+  if (!tag) return;
+  await db
+    .prepare(`INSERT OR IGNORE INTO tags (id, name, color, created_at) VALUES (?, ?, ?, ?)`)
+    .bind(tag.id, tag.name, tag.color, new Date().toISOString())
+    .run();
+  await addTagToFriend(db, friendId, tag.id);
+
+  const scenarios = await db
+    .prepare(
+      `SELECT id FROM scenarios
+        WHERE trigger_type = 'tag_added'
+          AND trigger_tag_id = ?
+          AND is_active = 1
+          AND (line_account_id IS NULL OR line_account_id = ?)`,
+    )
+    .bind(tag.id, lineAccountId)
+    .all<{ id: string }>();
+  for (const scenario of scenarios.results) {
+    await enrollFriendInScenario(db, friendId, scenario.id);
+  }
 }
 
 async function resolveAccountIdFromLiff(c: Context<Env>): Promise<string | null> {
@@ -312,7 +371,7 @@ booking.post('/api/liff/booking/requests', async (c) => {
   // Menu + staff_menu lookup (must be offered)
   const menuRow = await c.env.DB
     .prepare(
-      `SELECT m.id, m.duration_minutes, m.buffer_after_minutes, m.base_price,
+      `SELECT m.id, m.name, m.duration_minutes, m.buffer_after_minutes, m.base_price,
               COALESCE(sm.override_duration_minutes, m.duration_minutes) AS dur,
               COALESCE(sm.override_price, m.base_price) AS price,
               sm.is_offered
@@ -322,7 +381,7 @@ booking.post('/api/liff/booking/requests', async (c) => {
           AND m.deleted_at IS NULL AND m.is_active = 1`,
     )
     .bind(body.menu_id, body.staff_id, accountId)
-    .first<{ duration_minutes: number; buffer_after_minutes: number; dur: number; price: number; is_offered: number | null }>();
+    .first<{ name: string; duration_minutes: number; buffer_after_minutes: number; dur: number; price: number; is_offered: number | null }>();
   if (!menuRow || menuRow.is_offered !== 1) {
     return c.json({ error: 'menu_not_offered' }, 422);
   }
@@ -339,8 +398,20 @@ booking.post('/api/liff/booking/requests', async (c) => {
 
   // Server-side availability 再検証: シフト内 / リードタイム / 既存予約と非衝突を保証する。
   // UI フィルタだけでは公開 API への直 POST で営業時間外予約を作れてしまうため必須。
-  const startJstDate = new Date(startsAt.getTime() + 9 * 3600_000).toISOString().slice(0, 10);
-  const startJstHHMM = new Date(startsAt.getTime() + 9 * 3600_000).toISOString().slice(11, 16);
+  const rawStartJstDate = new Date(startsAt.getTime() + 9 * 3600_000).toISOString().slice(0, 10);
+  const rawStartJstHHMM = new Date(startsAt.getTime() + 9 * 3600_000).toISOString().slice(11, 16);
+  const normalizedStart = normalizeOverMidnightStart(rawStartJstDate, rawStartJstHHMM);
+  const startJstDate = normalizedStart.date;
+  const startJstHHMM = normalizedStart.hhmm;
+  if (isRegularClosedDay(startJstDate)) return c.json({ error: 'regular_holiday' }, 422);
+  const nekoyaRule = validateNekoyaBookingRequest({
+    menuName: menuRow.name,
+    price: menuRow.price,
+    startJstDate,
+    startJstHHMM,
+    customerNote: body.customer_note,
+  });
+  if (!nekoyaRule.ok) return c.json({ error: nekoyaRule.error }, 422);
   const shift = await c.env.DB
     .prepare(`SELECT start_time, end_time FROM staff_shifts WHERE staff_id = ? AND work_date = ?`)
     .bind(body.staff_id, startJstDate)
@@ -361,8 +432,8 @@ booking.post('/api/liff/booking/requests', async (c) => {
   const slotsToday = computeSlots({
     working: [{ start: shift.start_time, end: shift.end_time }],
     busy: existingBookings.results.map((b) => ({
-      start: new Date(new Date(b.starts_at).getTime() + 9 * 3600_000).toISOString().slice(11, 16),
-      end: new Date(new Date(b.block_ends_at).getTime() + 9 * 3600_000).toISOString().slice(11, 16),
+      start: jstHHMMForOperationalDate(b.starts_at, startJstDate),
+      end: jstHHMMForOperationalDate(b.block_ends_at, startJstDate),
     })),
     menu: { duration_minutes: menuRow.dur, buffer_after_minutes: menuRow.buffer_after_minutes },
     granularityMinutes: 30,
@@ -404,7 +475,7 @@ booking.post('/api/liff/booking/requests', async (c) => {
       blockEndsAt.toISOString(),
       'requested' satisfies BookingStatus,
       body.customer_note ?? null,
-      menuRow.price,
+      nekoyaRule.normalizedPrice,
       nowIso,
       // NOT EXISTS subquery params
       body.staff_id,
@@ -426,11 +497,16 @@ booking.post('/api/liff/booking/requests', async (c) => {
     return c.json(err, 409);
   }
 
-  // Fire-and-forget notification — failures must not roll back the booking.
+  // Fire-and-forget notification / intent tagging — failures must not roll back the booking.
   c.executionCtx.waitUntil(
-    notifyForBooking(c.env.DB, bookingId, 'requested').catch((err) =>
-      console.error('booking notify (requested) failed:', err),
-    ),
+    Promise.all([
+      notifyForBooking(c.env.DB, bookingId, 'requested').catch((err) =>
+        console.error('booking notify (requested) failed:', err),
+      ),
+      applyBookingIntentTag(c.env.DB, friendId, menuRow.name, accountId).catch((err) =>
+        console.error('booking intent tag failed:', err),
+      ),
+    ]),
   );
 
   const responseBody = { booking_id: bookingId, status: 'requested' };
@@ -488,6 +564,51 @@ booking.get('/api/liff/booking/me', async (c) => {
     .all();
 
   return c.json({ upcoming: upcoming.results, past: past.results });
+});
+
+booking.post('/api/liff/booking/me/:id/cancel', async (c) => {
+  const accountId = await resolveAccountIdFromLiff(c);
+  if (!accountId) return c.json({ error: 'unknown_liff' }, 404);
+  const callerLineUserId = await verifyCallerLineUserId(c);
+  if (!callerLineUserId) return c.json({ error: 'unauthorized' }, 401);
+  const friendId = await resolveFriendId(c, callerLineUserId, accountId);
+  if (!friendId) return c.json({ error: 'not_found' }, 404);
+
+  const id = c.req.param('id');
+  const row = await c.env.DB
+    .prepare(
+      `SELECT id, status, starts_at
+         FROM bookings
+        WHERE id = ? AND friend_id = ? AND line_account_id = ?`,
+    )
+    .bind(id, friendId, accountId)
+    .first<{ id: string; status: BookingStatus; starts_at: string }>();
+  if (!row) return c.json({ error: 'not_found' }, 404);
+  if (!['requested', 'confirmed'].includes(row.status)) {
+    return c.json({ error: 'cancel_not_allowed' }, 409);
+  }
+  if (new Date(row.starts_at).getTime() <= Date.now()) {
+    return c.json({ error: 'cancel_deadline_passed' }, 409);
+  }
+
+  const result = await c.env.DB
+    .prepare(
+      `UPDATE bookings
+          SET status = 'cancelled',
+              decided_at = ?,
+              updated_at = strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')
+        WHERE id = ? AND friend_id = ? AND line_account_id = ? AND status IN ('requested','confirmed')`,
+    )
+    .bind(new Date().toISOString(), id, friendId, accountId)
+    .run();
+  if ((result.meta?.changes ?? 0) === 0) {
+    return c.json({ error: 'concurrent_update' }, 409);
+  }
+  await c.env.DB
+    .prepare(`UPDATE booking_reminders SET status='cancelled' WHERE booking_id = ? AND status IN ('pending','failed')`)
+    .bind(id)
+    .run();
+  return c.json({ ok: true, status: 'cancelled' });
 });
 
 // ================================================================
